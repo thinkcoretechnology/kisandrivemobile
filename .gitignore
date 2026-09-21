@@ -1,0 +1,25 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub/
+.pub-cache/
+
+# Android
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/key.properties
+**.apk
+
+# iOS
+ios/Runner.xcodeproj/project.xcworkspace/
+ios/Runner.jsonwebtoken
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+node_modules/
