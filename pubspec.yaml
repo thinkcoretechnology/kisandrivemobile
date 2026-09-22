@@ -1,0 +1,28 @@
+name: kisandrive_mobile
+description: KisanDrive SaaS Tractor & Agricultural Equipment Management ERP Mobile App
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.3.0
+  shared_preferences: ^2.5.3
+  intl: ^0.20.3
+  image_picker: ^1.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/kisandrive_logo.png
+    - assets/images/splashscreen.png
