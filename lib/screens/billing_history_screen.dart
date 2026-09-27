@@ -71,22 +71,26 @@ class _BillingHistoryScreenState extends State<BillingHistoryScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🧾 Billing Receipt', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        title: const Text('🧾 Billing Receipt', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Farmer: ${entry.customerName}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text('Tractor: ${entry.tractorRegistration} (${entry.tractorModel})'),
-            Text('Service: ${entry.serviceName}'),
-            Text('Date: ${entry.entryDate}'),
+            Text('Farmer: ${entry.customerName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A))),
+            const SizedBox(height: 4),
+            Text('Tractor: ${entry.tractorRegistration} (${entry.tractorModel})', style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
+            const SizedBox(height: 4),
+            Text('Service: ${entry.serviceName}', style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
+            const SizedBox(height: 4),
+            Text('Date: ${DateFormatter.formatDDMMYYYY(entry.entryDate)}', style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
             const Divider(),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Net Payable Amount:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Net Payable Amount:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A))),
                 Text(
-                  '₹${entry.netPayable.toStringAsFixed(0)}',
+                  '₹${(entry.netPayable > 0 ? entry.netPayable : entry.totalAmount).toStringAsFixed(0)}',
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.tealPrimary),
                 ),
               ],

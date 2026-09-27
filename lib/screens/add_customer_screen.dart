@@ -60,10 +60,16 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
     }).toList();
   }
 
+  double _parseNum(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    return double.tryParse(val.toString()) ?? 0.0;
+  }
+
   // Format decimal hours to X hrs Y mins
   String _formatDuration(dynamic rawHours) {
     if (rawHours == null) return '';
-    final double hours = double.tryParse(rawHours.toString()) ?? 0.0;
+    final double hours = _parseNum(rawHours);
     if (hours <= 0) return '';
     final totalMinutes = (hours * 60).round();
     final h = totalMinutes ~/ 60;
@@ -248,39 +254,88 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
   }
 
   // Popup Modal showing Bill History and Pay History Tables + Pay Dues Button
-  void _openClientHistoryModal(Customer customer) async {
+  void _openClientHistoryModal(Customer customer) {
     final token = widget.authService.token;
     if (token == null) return;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final ledgerData = await ApiService.getCustomerLedger(token, customer.customerId);
-    if (!mounted) return;
-    Navigator.pop(context); // Close loading indicator
-
-    if (ledgerData == null) return;
-
-    final List rawLedger = ledgerData['ledger'] ?? [];
-    final double currentBal = (ledgerData['current_balance'] ?? 0).toDouble();
-
-    final billHistory = rawLedger.where((item) => item['type'] == 'WORK_BILL' || item['type'] == 'OPENING_BALANCE').toList();
-    final payHistory = rawLedger.where((item) => item['type'] == 'PAYMENT').toList();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => DefaultTabController(
-        length: 2,
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.85,
-          padding: const EdgeInsets.all(16),
-          child: Column(
+      builder: (ctx) => FutureBuilder<Map<String, dynamic>?>(
+        future: ApiService.getCustomerLedger(token, customer.customerId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return SizedBox(
+              height: MediaQuery.of(context).size.height * 0.4,
+              child: const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: AppColors.tealPrimary),
+                    SizedBox(height: 12),
+                    Text('Loading Farmer Ledger & Dues...', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          if (snapshot.hasError || snapshot.data == null) {
+            return SizedBox(
+              height: MediaQuery.of(context).size.height * 0.3,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                    const SizedBox(height: 8),
+                    const Text('Unable to load ledger history.', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          final ledgerData = snapshot.data!;
+          final List rawLedger = ledgerData['ledger'] ?? [];
+          final double currentBal = (ledgerData['current_balance'] ?? 0).toDouble();
+
+          final billHistory = rawLedger.where((item) => item['type'] == 'WORK_BILL' || item['type'] == 'OPENING_BALANCE').toList();
+          final payHistory = rawLedger.where((item) => item['type'] == 'PAYMENT').toList();
+
+          double totalDecimalHours = 0.0;
+          double subTotalBillAmount = 0.0;
+          for (final item in billHistory) {
+            final details = item['details'] as Map<String, dynamic>?;
+            final hrs = _parseNum(item['actual_hours'] ?? details?['actual_hours']);
+            totalDecimalHours += hrs;
+
+            final amt = _parseNum(item['amount'] ?? item['charge_amount'] ?? details?['net_payable'] ?? details?['total_amount']);
+            subTotalBillAmount += amt;
+          }
+          final totalHoursStr = _formatDuration(totalDecimalHours);
+
+          double totalPaidAmount = 0.0;
+          for (final item in payHistory) {
+            final details = item['details'] as Map<String, dynamic>?;
+            final amt = _parseNum(item['amount'] ?? item['payment_amount'] ?? details?['amount_paid']);
+            totalPaidAmount += amt;
+          }
+
+          final double grandTotalRemaining = currentBal;
+
+          return DefaultTabController(
+            length: 2,
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              padding: const EdgeInsets.all(16),
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Header
@@ -290,11 +345,11 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(customer.customerName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(customer.customerName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                       Text('📞 ${customer.primaryPhone} • 📍 ${customer.villageLocation}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     ],
                   ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                  IconButton(icon: const Icon(Icons.close, color: Color(0xFF0F172A)), onPressed: () => Navigator.pop(ctx)),
                 ],
               ),
               const SizedBox(height: 12),
@@ -319,8 +374,8 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          currentBal > 0 ? '₹${currentBal.toStringAsFixed(0)}' : '₹0 (Fully Paid)',
-                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: currentBal > 0 ? Colors.red : Colors.green),
+                          '₹${currentBal.toStringAsFixed(0)}',
+                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: currentBal > 0 ? Colors.red.shade700 : Colors.green.shade700),
                         ),
                       ],
                     ),
@@ -329,10 +384,11 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.tealPrimary,
                           foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         icon: const Icon(Icons.payment, size: 16),
-                        label: const Text('Pay Dues Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        label: const Text('💳 Pay Dues Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         onPressed: () {
                           Navigator.pop(ctx); // Close ledger modal
                           _openPayDuesOnSamePageModal(customer, currentBal); // Open Pay Dues Modal ON THE SAME PAGE!
@@ -341,77 +397,139 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
-              // 2 Tabs Header: Billing History vs Payment History
+              // TAB BAR
               const TabBar(
                 labelColor: AppColors.tealPrimary,
                 unselectedLabelColor: Colors.grey,
                 indicatorColor: AppColors.tealPrimary,
-                indicatorWeight: 3,
                 tabs: [
                   Tab(text: '⚡ Work Bills History'),
                   Tab(text: '💳 Pay Receipts History'),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
-              // Tab Views
               Expanded(
                 child: TabBarView(
                   children: [
-                    // TAB 1: WORK BILLS TABLE
+                    // TAB 1: WORK BILLS TABLE & SUMMARY TOTAL CARD
                     billHistory.isEmpty
                         ? const Center(child: Text('No work bills recorded for this farmer.', style: TextStyle(color: Colors.grey)))
-                        : SingleChildScrollView(
-                            scrollDirection: Axis.vertical,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: DataTable(
-                                headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
-                                columns: const [
-                                  DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Type/Work', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Tractor', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Hours/Loads', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Bill Amt (₹)', style: TextStyle(fontWeight: FontWeight.bold))),
-                                ],
-                                rows: billHistory.map((item) {
-                                  final isOB = item['type'] == 'OPENING_BALANCE';
-                                  final details = item['details'] as Map<String, dynamic>?;
-                                  final serviceName = item['service_name'] ?? details?['service_name'] ?? (isOB ? 'Opening Balance' : 'Field Work');
-                                  final tractorReg = item['tractor_reg'] ?? details?['tractor_name'] ?? details?['tractor_registration'] ?? '-';
-                                  final actualHrs = item['actual_hours'] ?? details?['actual_hours'];
-                                  final loadCnt = item['load_count'] ?? details?['load_count'];
-                                  final durationStr = isOB ? '-' : _formatDuration(actualHrs);
-                                  final num amtVal = item['amount'] ?? item['charge_amount'] ?? details?['net_payable'] ?? details?['total_amount'] ?? 0;
+                        : Column(
+                            children: [
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.vertical,
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: DataTable(
+                                      columnSpacing: 10,
+                                      horizontalMargin: 8,
+                                      headingRowHeight: 38,
+                                      dataRowMinHeight: 36,
+                                      dataRowMaxHeight: 44,
+                                      headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                                      columns: const [
+                                        DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                        DataColumn(label: Text('Type/Work', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                        DataColumn(label: Text('Tractor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                        DataColumn(label: Text('Hours/Loads', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                        DataColumn(label: Text('Bill Amt (₹)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                      ],
+                                      rows: billHistory.map((item) {
+                                        final isOB = item['type'] == 'OPENING_BALANCE';
+                                        final details = item['details'] as Map<String, dynamic>?;
+                                        final serviceName = item['service_name'] ?? details?['service_name'] ?? (isOB ? 'Opening Balance' : 'Field Work');
+                                        final tractorReg = item['tractor_reg'] ?? details?['tractor_name'] ?? details?['tractor_registration'] ?? '-';
+                                        final actualHrs = item['actual_hours'] ?? details?['actual_hours'];
+                                        final loadCnt = item['load_count'] ?? details?['load_count'];
+                                        final durationStr = isOB ? '-' : _formatDuration(actualHrs);
+                                        final double amtVal = _parseNum(item['amount'] ?? item['charge_amount'] ?? details?['net_payable'] ?? details?['total_amount']);
 
-                                  return DataRow(
-                                    cells: [
-                                      DataCell(
-                                        Text(
-                                          item['date'] != null ? DateFormatter.formatDDMMYYYY(item['date']) : '-',
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                      ),
-                                      DataCell(Text(
-                                        serviceName,
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isOB ? Colors.orange.shade800 : Colors.black),
-                                      )),
-                                      DataCell(Text(tractorReg.toString(), style: const TextStyle(fontSize: 11))),
-                                      DataCell(Text(
-                                        durationStr.isNotEmpty && durationStr != '-' ? durationStr : (loadCnt != null && loadCnt > 0 ? '$loadCnt loads' : '-'),
-                                        style: const TextStyle(fontSize: 11),
-                                      )),
-                                      DataCell(Text('₹${amtVal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green))),
-                                    ],
-                                  );
-                                }).toList(),
+                                        return DataRow(
+                                          cells: [
+                                            DataCell(
+                                              Text(
+                                                item['date'] != null ? DateFormatter.formatDDMMYYYY(item['date']) : '-',
+                                                style: const TextStyle(fontSize: 10),
+                                              ),
+                                            ),
+                                            DataCell(Text(
+                                              serviceName,
+                                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: isOB ? Colors.orange.shade800 : Colors.black),
+                                            )),
+                                            DataCell(Text(tractorReg.toString(), style: const TextStyle(fontSize: 10))),
+                                            DataCell(Text(
+                                              durationStr.isNotEmpty && durationStr != '-' ? durationStr : (loadCnt != null && loadCnt > 0 ? '$loadCnt loads' : '-'),
+                                              style: const TextStyle(fontSize: 10),
+                                            )),
+                                            DataCell(Text('₹${amtVal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.green))),
+                                          ],
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
+                              const SizedBox(height: 8),
+
+                              // LEDGER SUMMARY TOTALS CARD BELOW TABLE
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('⏱️ Total Work Hours:', style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                                        Text(totalHoursStr.isNotEmpty && totalHoursStr != '-' ? totalHoursStr : '0 hrs', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('📋 Sub Total Amount (Bills):', style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                                        Text('₹${subTotalBillAmount.toStringAsFixed(0)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('💳 Paid Amount (Total):', style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                                        Text('- ₹${totalPaidAmount.toStringAsFixed(0)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0284C7))),
+                                      ],
+                                    ),
+                                    const Divider(height: 10),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        const Text('GRAND TOTAL (REMAINING DUE):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                        Text(
+                                          '₹${grandTotalRemaining.toStringAsFixed(0)}',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w900,
+                                            color: grandTotalRemaining > 0 ? Colors.red : AppColors.tealPrimary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
 
-                    // TAB 2: PAY RECEIPTS TABLE
+                    // TAB 2: PAY RECEIPTS TABLE (REFERENCE NO REMOVED, TIGHT COLUMNS)
                     payHistory.isEmpty
                         ? const Center(child: Text('No payment receipts recorded for this farmer.', style: TextStyle(color: Colors.grey)))
                         : SingleChildScrollView(
@@ -419,30 +537,31 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               child: DataTable(
+                                columnSpacing: 24,
+                                headingRowHeight: 38,
+                                dataRowMinHeight: 36,
+                                dataRowMaxHeight: 44,
                                 headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
                                 columns: const [
-                                  DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Payment Mode', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(label: Text('Paid Amount (₹)', style: TextStyle(fontWeight: FontWeight.bold))),
+                                  DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                  DataColumn(label: Text('Payment Mode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                  DataColumn(label: Text('Paid Amount (₹)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
                                 ],
                                 rows: payHistory.map((item) {
                                   final details = item['details'] as Map<String, dynamic>?;
                                   final payMode = item['payment_mode'] ?? details?['payment_mode'] ?? 'Cash';
-                                  final refNum = item['reference_number'] ?? details?['reference_number'] ?? '-';
-                                  final num amtVal = item['amount'] ?? item['payment_amount'] ?? details?['amount_paid'] ?? 0;
+                                  final double amtVal = _parseNum(item['amount'] ?? item['payment_amount'] ?? details?['amount_paid']);
 
                                   return DataRow(
                                     cells: [
                                       DataCell(
                                         Text(
                                           item['date'] != null ? DateFormatter.formatDDMMYYYY(item['date']) : '-',
-                                          style: const TextStyle(fontSize: 12),
+                                          style: const TextStyle(fontSize: 11),
                                         ),
                                       ),
-                                      DataCell(Text(payMode.toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                                      DataCell(Text(refNum.toString(), style: const TextStyle(fontSize: 11))),
-                                      DataCell(Text('₹${amtVal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0284C7)))),
+                                      DataCell(Text(payMode.toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11))),
+                                      DataCell(Text('₹${amtVal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0284C7)))),
                                     ],
                                   );
                                 }).toList(),
@@ -455,8 +574,10 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
             ],
           ),
         ),
-      ),
-    );
+      );
+    },
+  ),
+);
   }
 
   void _openCustomerModal({Customer? customer}) {

@@ -113,8 +113,15 @@ class _QuickBillScreenState extends State<QuickBillScreen> {
     }
   }
 
+  bool get _isFixedWork {
+    if (_selectedService == null) return false;
+    final u = _selectedService!.billingUnit.toLowerCase();
+    return u.contains('fixed') || u.contains('flat');
+  }
+
   bool get _isHoursWork {
     if (_selectedService == null) return true; // Default to hours if unselected
+    if (_isFixedWork || _isManualWork) return false; // Fixed and Manual work services do NOT use timer!
     final u = _selectedService!.billingUnit.toLowerCase();
     return u.contains('hour') || u.contains('hr');
   }
@@ -152,51 +159,58 @@ class _QuickBillScreenState extends State<QuickBillScreen> {
   }
 
   void _recalculateTimesAndAmounts() {
-    if (_selectedService == null) {
-      _durationFormattedText = '-';
-      _calculatedDecimalHours = 0.0;
-      _newWorkAmount = 0.0;
-      _cumulativeTotalAmount = _existingBalance;
-      return;
-    }
-
-    final rate = _selectedService!.defaultRate;
-
-    if (_isManualWork) {
-      _newWorkAmount = double.tryParse(_manualAmountController.text.trim()) ?? 0.0;
-      _durationFormattedText = 'Manual Entry';
-      _calculatedDecimalHours = 0.0;
-    } else if (_isHoursWork) {
-      // Calculate precise time difference for Per Hour
-      final startMin = _startTime.hour * 60 + _startTime.minute;
-      final endMin = _endTime.hour * 60 + _endTime.minute;
-
-      int diffMin = endMin - startMin;
-      if (diffMin < 0) {
-        diffMin += 24 * 60; // Crosses midnight handle
+    setState(() {
+      if (_selectedService == null) {
+        _durationFormattedText = '-';
+        _calculatedDecimalHours = 0.0;
+        _newWorkAmount = 0.0;
+        _cumulativeTotalAmount = _existingBalance;
+        return;
       }
 
-      final h = diffMin ~/ 60;
-      final m = diffMin % 60;
-      if (h > 0 && m > 0) {
-        _durationFormattedText = '$h hrs $m mins';
-      } else if (h > 0) {
-        _durationFormattedText = '$h hrs';
+      final rate = _selectedService!.defaultRate;
+
+      if (_isManualWork) {
+        _newWorkAmount = double.tryParse(_manualAmountController.text.trim()) ?? 0.0;
+        _durationFormattedText = 'Manual Entry';
+        _calculatedDecimalHours = 0.0;
+      } else if (_isFixedWork) {
+        // Fixed Work Service: NO TIMER! Default amount set automatically!
+        _newWorkAmount = rate;
+        _durationFormattedText = 'Fixed Rate (Flat ₹${rate.toStringAsFixed(0)})';
+        _calculatedDecimalHours = 0.0;
+      } else if (_isHoursWork) {
+        // Calculate precise time difference for Per Hour
+        final startMin = _startTime.hour * 60 + _startTime.minute;
+        final endMin = _endTime.hour * 60 + _endTime.minute;
+
+        int diffMin = endMin - startMin;
+        if (diffMin < 0) {
+          diffMin += 24 * 60; // Crosses midnight handle
+        }
+
+        final h = diffMin ~/ 60;
+        final m = diffMin % 60;
+        if (h > 0 && m > 0) {
+          _durationFormattedText = '$h hrs $m mins';
+        } else if (h > 0) {
+          _durationFormattedText = '$h hrs';
+        } else {
+          _durationFormattedText = '$m mins';
+        }
+
+        _calculatedDecimalHours = diffMin / 60.0;
+        _newWorkAmount = _calculatedDecimalHours * rate;
       } else {
-        _durationFormattedText = '$m mins';
+        // Non-Hours Mode (Per Load / Per Acre) -> Quantity * Rate
+        final qty = double.tryParse(_quantityController.text.trim()) ?? 1.0;
+        _newWorkAmount = qty * rate;
+        _durationFormattedText = '${qty.toStringAsFixed(0)} ${_selectedService!.billingUnit}';
+        _calculatedDecimalHours = 0.0;
       }
 
-      _calculatedDecimalHours = diffMin / 60.0;
-      _newWorkAmount = _calculatedDecimalHours * rate;
-    } else {
-      // Non-Hours Mode (Per Load / Per Acre) -> Quantity * Rate
-      final qty = double.tryParse(_quantityController.text.trim()) ?? 1.0;
-      _newWorkAmount = qty * rate;
-      _durationFormattedText = '${qty.toStringAsFixed(0)} ${_selectedService!.billingUnit}';
-      _calculatedDecimalHours = 0.0;
-    }
-
-    _cumulativeTotalAmount = _existingBalance + _newWorkAmount;
+      _cumulativeTotalAmount = _existingBalance + _newWorkAmount;
+    });
   }
 
   void _openQuickAddFarmerModal() {
@@ -339,6 +353,7 @@ class _QuickBillScreenState extends State<QuickBillScreen> {
     final loadCnt = !_isHoursWork && !_isManualWork ? (int.tryParse(_quantityController.text.trim()) ?? 1) : 0;
     final manualAmt = _isManualWork ? (double.tryParse(_manualAmountController.text.trim()) ?? 0.0) : 0.0;
     final actualHrs = _isHoursWork ? _calculatedDecimalHours : 0.0;
+    final rateToApply = _isManualWork ? manualAmt : _selectedService!.defaultRate;
 
     final success = await ApiService.createFieldWorkEntry(
       token,
@@ -348,7 +363,7 @@ class _QuickBillScreenState extends State<QuickBillScreen> {
       _selectedService!.serviceId,
       actualHrs,
       loadCnt,
-      _selectedService!.defaultRate,
+      rateToApply,
       _manualAmountController.text.trim(),
       _remarksController.text.trim(),
     );
@@ -603,6 +618,36 @@ class _QuickBillScreenState extends State<QuickBillScreen> {
                     ),
                     const SizedBox(height: 16),
                   ]
+                  // IF FIXED RATE WORK IS CHOSEN -> DEFAULT AMOUNT SET! TIMER HIDDEN!
+                  else if (_isFixedWork) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.tealPrimary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.tealPrimary.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.check_circle, color: AppColors.tealPrimary, size: 20),
+                              SizedBox(width: 8),
+                              Text('📌 FIXED RATE WORK (DEFAULT AMOUNT SET)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.tealPrimary)),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Default Rate Set: ₹${_selectedService?.defaultRate.toStringAsFixed(0) ?? "0"} / work. Timer is hidden for fixed rate works.',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ]
                   // IF HOURS WORK IS CHOSEN -> SHOW START & END TIME PICKERS + DURATION
                   else if (_isHoursWork) ...[
                     Row(
@@ -676,12 +721,16 @@ class _QuickBillScreenState extends State<QuickBillScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('CALCULATED WORK DURATION:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                          Text(
-                            _durationFormattedText == '-'
-                                ? '-'
-                                : '⏱️ $_durationFormattedText (${_calculatedDecimalHours.toStringAsFixed(2)} hrs)',
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.goldPrimary),
+                          const Text('CALCULATED DURATION:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              _durationFormattedText == '-'
+                                  ? '-'
+                                  : '⏱️ $_durationFormattedText (${_calculatedDecimalHours.toStringAsFixed(2)} hrs)',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.goldPrimary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ),
